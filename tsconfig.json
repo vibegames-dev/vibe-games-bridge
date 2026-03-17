@@ -1,0 +1,3 @@
+{
+  "extends": "@vibe-games-bridge/config/tsconfig.base.json"
+}

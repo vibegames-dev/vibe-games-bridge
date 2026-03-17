@@ -1,0 +1,9 @@
+{
+  "extends": "@vibe-games-bridge/config/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

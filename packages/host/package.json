@@ -1,0 +1,19 @@
+{
+  "name": "@vibe-games-bridge/host",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vibe-games-bridge/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@vibe-games-bridge/config": "workspace:*",
+    "typescript": "~5.9.3"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

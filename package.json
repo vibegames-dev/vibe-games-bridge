@@ -1,0 +1,29 @@
+{
+  "name": "vibe-games-bridge",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "description": "WebSocket-first bridge between the Vibe Games editor and external tooling.",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "format": "biome format --write",
+    "format-and-lint": "biome check .",
+    "format-and-lint:fix": "biome check . --write",
+    "check-types": "turbo check-types",
+    "validate": "pnpm format-and-lint && pnpm check-types"
+  },
+  "author": "Mateusz Migas",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.7",
+    "@types/node": "^25.5.0",
+    "@vibe-games-bridge/config": "workspace:*",
+    "turbo": "^2.8.17",
+    "typescript": "~5.9.3"
+  }
+}
