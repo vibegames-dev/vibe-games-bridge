@@ -3,10 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "moduleResolution": "bundler",
-    "types": ["node", "vscode"],
-    "paths": {
-      "vscode": ["./node_modules/@types/vscode/index.d.ts"]
-    }
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules"]

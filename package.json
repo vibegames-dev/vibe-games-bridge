@@ -19,6 +19,9 @@
     "node": ">=20",
     "pnpm": ">=10"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "devDependencies": {
     "@biomejs/biome": "2.4.7",
     "@types/node": "^25.5.0",

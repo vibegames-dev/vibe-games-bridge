@@ -1,17 +1,42 @@
 {
-  "name": "@vibe-games-bridge/vscode",
+  "name": "vscode",
+  "publisher": "vibe-games-bridge",
+  "displayName": "Vibe Games Bridge",
+  "description": "Connect VS Code to the Vibe Games editor over WebSocket.",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
+  "main": "./dist/extension.js",
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "dev": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "vscode:prepublish": "pnpm run build",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
   },
   "engines": {
     "vscode": "^1.100.0"
   },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished", "onUri"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "vibeGamesBridge.reconnect",
+        "title": "Vibe Games: Reconnect"
+      }
+    ]
+  },
+  "dependencies": {
+    "@vibe-games-bridge/protocol": "workspace:*",
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "@types/ws": "^8.5.14",
     "@vibe-games-bridge/config": "workspace:*",
-    "typescript": "~5.9.3"
+    "esbuild": "^0.25.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
   },
   "exports": {
     ".": "./src/index.ts"
