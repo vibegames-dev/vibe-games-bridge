@@ -90,25 +90,27 @@ const startServer = (): void => {
           });
         },
       },
-      { scripts: [], assets: [] },
+      { scripts: {}, assets: [] },
     );
 
-    // When scripts change (from web app), update the file system
+    // When scripts change (full snapshot from web app), update the file system
     peer.resources.scripts.subscribe((scripts) => {
+      const count = Object.keys(scripts).length;
       outputChannel.appendLine(
-        `[bridge] Scripts subscribe fired: ${scripts.length} script(s)`,
+        `[bridge] Scripts subscribe fired: ${count} script(s)`,
       );
       fsProvider.updateScripts(scripts);
       mountWorkspaceFolder();
     });
 
-    // When a file is edited in VS Code, push back to the web app
-    fsProvider.onScriptWrite = (script) => {
-      const current = peer.resources.scripts.getValue();
-      const updated = current.map((s) =>
-        s.path === script.path ? { ...s, content: script.content } : s,
-      );
-      peer.resources.scripts.setValue(updated);
+    // When a file is created/edited in VS Code, push just that key back
+    fsProvider.onScriptWrite = (path, value) => {
+      peer.resources.scripts.setKey(path, value);
+    };
+
+    // When a file is deleted in VS Code, remove the key
+    fsProvider.onScriptDelete = (path) => {
+      peer.resources.scripts.deleteKey(path);
     };
 
     // Listen for console log events
@@ -118,6 +120,7 @@ const startServer = (): void => {
 
     ws.on("close", () => {
       fsProvider.onScriptWrite = undefined;
+      fsProvider.onScriptDelete = undefined;
       setStatusBar("waiting");
       outputChannel.appendLine("[bridge] Browser disconnected");
     });

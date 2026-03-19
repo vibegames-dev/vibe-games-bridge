@@ -6,6 +6,7 @@ const testSchema = defineBridgeSchema({
   resources: {
     counter: z.number(),
     label: z.string(),
+    items: z.record(z.string(), z.object({ value: z.string() })),
   },
   events: {
     ping: z.object({ ts: z.number() }),
@@ -38,6 +39,8 @@ function createMockTransport(): Transport & {
   };
 }
 
+const defaults = () => ({ counter: 0, label: "", items: {} });
+
 describe("createBridgePeer", () => {
   describe("resources", () => {
     it("initializes resources with provided values", () => {
@@ -45,6 +48,7 @@ describe("createBridgePeer", () => {
       const peer = createBridgePeer(testSchema, transport, {
         counter: 0,
         label: "hello",
+        items: {},
       });
 
       expect(peer.resources.counter.getValue()).toBe(0);
@@ -53,10 +57,7 @@ describe("createBridgePeer", () => {
 
     it("sends resource:update over wire when resource changes locally", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "hi",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       peer.resources.counter.setValue(5);
 
@@ -69,10 +70,7 @@ describe("createBridgePeer", () => {
 
     it("updates resource when receiving resource:update from wire", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "hi",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       transport.simulateIncoming({
         kind: "resource:update",
@@ -85,7 +83,7 @@ describe("createBridgePeer", () => {
 
     it("does not echo resource:update back to wire (no infinite loop)", () => {
       const transport = createMockTransport();
-      createBridgePeer(testSchema, transport, { counter: 0, label: "hi" });
+      createBridgePeer(testSchema, transport, defaults());
 
       const sentBefore = transport.sent.length;
       transport.simulateIncoming({
@@ -98,13 +96,194 @@ describe("createBridgePeer", () => {
     });
   });
 
+  describe("resource keyed operations", () => {
+    it("setKey sends resource:key-set with only the changed entry", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old" } },
+      });
+
+      peer.resources.items.setKey("a", { value: "new" });
+
+      expect(transport.sent).toContainEqual({
+        kind: "resource:key-set",
+        key: "items",
+        entryKey: "a",
+        data: { value: "new" },
+      });
+    });
+
+    it("setKey does not send a full resource:update", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old" } },
+      });
+
+      const sentBefore = transport.sent.length;
+      peer.resources.items.setKey("a", { value: "new" });
+
+      const fullUpdates = transport.sent
+        .slice(sentBefore)
+        .filter(
+          (m) => (m as Record<string, unknown>).kind === "resource:update",
+        );
+      expect(fullUpdates).toHaveLength(0);
+    });
+
+    it("setKey updates local value correctly", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old-a" }, b: { value: "old-b" } },
+      });
+
+      peer.resources.items.setKey("b", { value: "new-b" });
+
+      expect(peer.resources.items.getValue()).toEqual({
+        a: { value: "old-a" },
+        b: { value: "new-b" },
+      });
+    });
+
+    it("setKey notifies subscribers", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old" } },
+      });
+
+      const listener = vi.fn();
+      peer.resources.items.subscribe(listener);
+
+      peer.resources.items.setKey("a", { value: "new" });
+
+      expect(listener).toHaveBeenCalledWith({ a: { value: "new" } });
+    });
+
+    it("setKey can add a new entry", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "a" } },
+      });
+
+      peer.resources.items.setKey("b", { value: "b" });
+
+      expect(peer.resources.items.getValue()).toEqual({
+        a: { value: "a" },
+        b: { value: "b" },
+      });
+    });
+
+    it("deleteKey sends resource:key-delete", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "a" }, b: { value: "b" } },
+      });
+
+      peer.resources.items.deleteKey("a");
+
+      expect(transport.sent).toContainEqual({
+        kind: "resource:key-delete",
+        key: "items",
+        entryKey: "a",
+      });
+    });
+
+    it("deleteKey removes the entry locally", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "a" }, b: { value: "b" } },
+      });
+
+      peer.resources.items.deleteKey("a");
+
+      expect(peer.resources.items.getValue()).toEqual({
+        b: { value: "b" },
+      });
+    });
+
+    it("handles incoming resource:key-set from wire", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old" } },
+      });
+
+      transport.simulateIncoming({
+        kind: "resource:key-set",
+        key: "items",
+        entryKey: "a",
+        data: { value: "patched" },
+      });
+
+      expect(peer.resources.items.getValue()).toEqual({
+        a: { value: "patched" },
+      });
+    });
+
+    it("handles incoming resource:key-delete from wire", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "a" }, b: { value: "b" } },
+      });
+
+      transport.simulateIncoming({
+        kind: "resource:key-delete",
+        key: "items",
+        entryKey: "a",
+      });
+
+      expect(peer.resources.items.getValue()).toEqual({
+        b: { value: "b" },
+      });
+    });
+
+    it("does not echo resource:key-set back to wire", () => {
+      const transport = createMockTransport();
+      createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "old" } },
+      });
+
+      const sentBefore = transport.sent.length;
+      transport.simulateIncoming({
+        kind: "resource:key-set",
+        key: "items",
+        entryKey: "a",
+        data: { value: "patched" },
+      });
+
+      expect(transport.sent.length).toBe(sentBefore);
+    });
+
+    it("does not echo resource:key-delete back to wire", () => {
+      const transport = createMockTransport();
+      createBridgePeer(testSchema, transport, {
+        ...defaults(),
+        items: { a: { value: "a" } },
+      });
+
+      const sentBefore = transport.sent.length;
+      transport.simulateIncoming({
+        kind: "resource:key-delete",
+        key: "items",
+        entryKey: "a",
+      });
+
+      expect(transport.sent.length).toBe(sentBefore);
+    });
+  });
+
   describe("events", () => {
     it("sends events over wire via emit", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       peer.emit("ping", { ts: 123 });
 
@@ -117,10 +296,7 @@ describe("createBridgePeer", () => {
 
     it("delivers incoming events to registered listeners", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       const listener = vi.fn();
       peer.on("ping", listener);
@@ -136,10 +312,7 @@ describe("createBridgePeer", () => {
 
     it("supports multiple listeners for the same event", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       const listener1 = vi.fn();
       const listener2 = vi.fn();
@@ -160,14 +333,10 @@ describe("createBridgePeer", () => {
   describe("requests", () => {
     it("sends request over wire and resolves on response", async () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       const promise = peer.request("add", { a: 2, b: 3 });
 
-      // Find the sent request to get its id
       const sentReq = transport.sent.find(
         (m) => (m as Record<string, unknown>).kind === "request",
       ) as Record<string, unknown>;
@@ -175,7 +344,6 @@ describe("createBridgePeer", () => {
       expect(sentReq.type).toBe("add");
       expect(sentReq.params).toEqual({ a: 2, b: 3 });
 
-      // Simulate response
       transport.simulateIncoming({
         kind: "response",
         id: sentReq.id,
@@ -188,10 +356,7 @@ describe("createBridgePeer", () => {
 
     it("rejects on error response", async () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       const promise = peer.request("add", { a: 1, b: 1 });
       const sentReq = transport.sent.find(
@@ -209,10 +374,7 @@ describe("createBridgePeer", () => {
 
     it("handles incoming requests via onRequest", async () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       peer.onRequest("add", async (params) => ({
         sum: params.a + params.b,
@@ -225,7 +387,6 @@ describe("createBridgePeer", () => {
         params: { a: 10, b: 20 },
       });
 
-      // Wait for async handler to complete
       await vi.waitFor(() => {
         expect(transport.sent).toContainEqual({
           kind: "response",
@@ -237,10 +398,7 @@ describe("createBridgePeer", () => {
 
     it("sends error response when handler throws", async () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
       peer.onRequest("add", async () => {
         throw new Error("handler failed");
@@ -264,7 +422,7 @@ describe("createBridgePeer", () => {
 
     it("sends error response when no handler is registered", async () => {
       const transport = createMockTransport();
-      createBridgePeer(testSchema, transport, { counter: 0, label: "" });
+      createBridgePeer(testSchema, transport, defaults());
 
       transport.simulateIncoming({
         kind: "request",
@@ -284,12 +442,8 @@ describe("createBridgePeer", () => {
   describe("wire protocol edge cases", () => {
     it("ignores malformed JSON messages", () => {
       const transport = createMockTransport();
-      const peer = createBridgePeer(testSchema, transport, {
-        counter: 0,
-        label: "",
-      });
+      const peer = createBridgePeer(testSchema, transport, defaults());
 
-      // Should not throw — pass raw invalid JSON string
       transport.simulateIncoming("not valid json" as unknown);
       expect(peer.resources.counter.getValue()).toBe(0);
     });

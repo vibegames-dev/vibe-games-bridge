@@ -2,5 +2,5 @@ export {
   assetEntrySchema,
   bridgeSchema,
   diagnosticSchema,
-  scriptEntrySchema,
+  scriptValueSchema,
 } from "./schema";

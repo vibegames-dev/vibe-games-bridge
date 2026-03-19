@@ -12,6 +12,8 @@ export type Transport = {
 
 type WireMessage =
   | { kind: "resource:update"; key: string; data: unknown }
+  | { kind: "resource:key-set"; key: string; entryKey: string; data: unknown }
+  | { kind: "resource:key-delete"; key: string; entryKey: string }
   | { kind: "request"; id: string; type: string; params: unknown }
   | { kind: "response"; id: string; result?: unknown; error?: string }
   | { kind: "event"; type: string; payload: unknown };
@@ -30,8 +32,24 @@ export const defineBridgeSchema = <
 
 // --- Type helpers ---
 
+type RecordValue<T> = T extends Record<string, infer V> ? V : never;
+
+type ObservableHandle<T> = {
+  subscribe(listener: (data: T) => void): () => void;
+  getValue(): T;
+  setValue(data: T): void;
+};
+
+type RecordHandle<T> = ObservableHandle<T> & {
+  setKey(entryKey: string, value: RecordValue<T>): void;
+  deleteKey(entryKey: string): void;
+};
+
+type ResourceHandle<T> =
+  T extends Record<string, unknown> ? RecordHandle<T> : ObservableHandle<T>;
+
 type ResourceObservables<R extends Record<string, z.ZodType>> = {
-  [K in keyof R]: Observable<z.infer<R[K]>>;
+  [K in keyof R]: ResourceHandle<z.infer<R[K]>>;
 };
 
 type ResourceValues<R extends Record<string, z.ZodType>> = {
@@ -78,16 +96,46 @@ export const createBridgePeer = <
 
   // Resources — observable per key, synced over wire
   let receivingFromWire = false;
+  let keyPatching = false;
   const resources = {} as ResourceObservables<R>;
   for (const key in schema.resources) {
     const observable = new Observable(initialResources[key]);
     observable.subscribe((data) => {
-      if (!receivingFromWire) {
+      if (!receivingFromWire && !keyPatching) {
         sendWire({ kind: "resource:update", key, data });
       }
     });
+    const handle: RecordHandle<unknown> = {
+      subscribe: observable.subscribe,
+      getValue: observable.getValue,
+      setValue: observable.setValue,
+      setKey(entryKey: string, value: unknown) {
+        const current = observable.getValue();
+        if (typeof current !== "object" || current === null) return;
+        const updated = { ...current, [entryKey]: value };
+        keyPatching = true;
+        try {
+          observable.setValue(updated);
+        } finally {
+          keyPatching = false;
+        }
+        sendWire({ kind: "resource:key-set", key, entryKey, data: value });
+      },
+      deleteKey(entryKey: string) {
+        const current = observable.getValue();
+        if (typeof current !== "object" || current === null) return;
+        const { [entryKey]: _, ...rest } = current as Record<string, unknown>;
+        keyPatching = true;
+        try {
+          observable.setValue(rest as typeof current);
+        } finally {
+          keyPatching = false;
+        }
+        sendWire({ kind: "resource:key-delete", key, entryKey });
+      },
+    };
     // biome-ignore lint: generic boundary cast
-    (resources as any)[key] = observable;
+    (resources as any)[key] = handle;
   }
 
   // Requests — can both send and handle
@@ -114,12 +162,57 @@ export const createBridgePeer = <
 
     switch (msg.kind) {
       case "resource:update": {
-        const observable = (resources as Record<string, Observable<unknown>>)[
+        const handle = (resources as Record<string, ResourceHandle<unknown>>)[
           msg.key
         ];
-        receivingFromWire = true;
-        observable?.setValue(msg.data);
-        receivingFromWire = false;
+        if (handle) {
+          receivingFromWire = true;
+          try {
+            handle.setValue(msg.data);
+          } finally {
+            receivingFromWire = false;
+          }
+        }
+        break;
+      }
+
+      case "resource:key-set": {
+        const handle = (resources as Record<string, ResourceHandle<unknown>>)[
+          msg.key
+        ];
+        if (handle) {
+          const current = handle.getValue();
+          if (typeof current === "object" && current !== null) {
+            receivingFromWire = true;
+            try {
+              handle.setValue({ ...current, [msg.entryKey]: msg.data });
+            } finally {
+              receivingFromWire = false;
+            }
+          }
+        }
+        break;
+      }
+
+      case "resource:key-delete": {
+        const handle = (resources as Record<string, ResourceHandle<unknown>>)[
+          msg.key
+        ];
+        if (handle) {
+          const current = handle.getValue();
+          if (typeof current === "object" && current !== null) {
+            const { [msg.entryKey]: _, ...rest } = current as Record<
+              string,
+              unknown
+            >;
+            receivingFromWire = true;
+            try {
+              handle.setValue(rest);
+            } finally {
+              receivingFromWire = false;
+            }
+          }
+        }
         break;
       }
 
@@ -165,11 +258,6 @@ export const createBridgePeer = <
       }
     }
   });
-
-  // Broadcast initial resource values so the remote peer is in sync
-  for (const key in schema.resources) {
-    sendWire({ kind: "resource:update", key, data: initialResources[key] });
-  }
 
   return {
     resources,

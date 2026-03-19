@@ -3,8 +3,7 @@ import { z } from "zod";
 
 // --- Resource item schemas ---
 
-export const scriptEntrySchema = z.object({
-  path: z.string(),
+export const scriptValueSchema = z.object({
   content: z.string(),
 });
 
@@ -28,7 +27,7 @@ export const diagnosticSchema = z.object({
 
 export const bridgeSchema = defineBridgeSchema({
   resources: {
-    scripts: z.array(scriptEntrySchema),
+    scripts: z.record(z.string(), scriptValueSchema),
     assets: z.array(assetEntrySchema),
   },
   events: {

@@ -7,29 +7,27 @@ const WS_URL = "ws://localhost:4567";
 const VSCODE_URI =
   "vscode://vibe-games-bridge.vscode/open?projectId=example-game";
 
-type Script = { path: string; content: string };
+type ScriptsMap = Record<string, { content: string }>;
 type Peer = BridgePeer<
   (typeof bridgeSchema)["resources"],
   (typeof bridgeSchema)["events"],
   (typeof bridgeSchema)["requests"]
 >;
 
-const initialScripts: Script[] = [
-  {
-    path: "scripts/playerController.ts",
+const initialScripts: ScriptsMap = {
+  "scripts/playerController.ts": {
     content:
       "export function movePlayer(\n  direction: { x: number; y: number; z: number },\n  speed: number\n) {\n  // TODO: implement player movement\n}",
   },
-  {
-    path: "scripts/enemyAi.ts",
+  "scripts/enemyAi.ts": {
     content:
       "export function updateEnemy(dt: number) {\n  // TODO: implement enemy AI\n}",
   },
-];
+};
 
 export const App = () => {
   const [logs, setLogs] = useState<string[]>([]);
-  const [scripts, setScripts] = useState<Script[]>(initialScripts);
+  const [scripts, setScripts] = useState<ScriptsMap>(initialScripts);
   const [connected, setConnected] = useState(false);
   const [lastResponse, setLastResponse] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
@@ -133,30 +131,30 @@ export const App = () => {
       .catch((err: unknown) => setLastResponse(`Error: ${err}`));
   };
 
-  const updateScript = (index: number, field: keyof Script, value: string) => {
-    setScripts((prev) => {
-      const next = prev.map((s, i) =>
-        i === index ? { ...s, [field]: value } : s,
-      );
-      peerRef.current?.resources.scripts.setValue(next);
-      return next;
-    });
+  const updateScriptContent = (path: string, content: string) => {
+    const value = { content };
+    setScripts((prev) => ({ ...prev, [path]: value }));
+    peerRef.current?.resources.scripts.setKey(path, value);
   };
 
   const addScript = () => {
-    setScripts((prev) => {
-      const next = [...prev, { path: "scripts/new.ts", content: "" }];
-      peerRef.current?.resources.scripts.setValue(next);
-      return next;
-    });
+    let name = "scripts/new.ts";
+    let i = 1;
+    while (name in scripts) {
+      name = `scripts/new${i}.ts`;
+      i++;
+    }
+    const value = { content: "" };
+    setScripts((prev) => ({ ...prev, [name]: value }));
+    peerRef.current?.resources.scripts.setKey(name, value);
   };
 
-  const removeScript = (index: number) => {
+  const removeScript = (path: string) => {
     setScripts((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      peerRef.current?.resources.scripts.setValue(next);
-      return next;
+      const { [path]: _, ...rest } = prev;
+      return rest;
     });
+    peerRef.current?.resources.scripts.deleteKey(path);
   };
 
   return (
@@ -211,9 +209,9 @@ export const App = () => {
       </Section>
 
       <Section title="Scripts (resource)">
-        {scripts.map((script, i) => (
+        {Object.entries(scripts).map(([path, { content }]) => (
           <div
-            key={i}
+            key={path}
             style={{
               marginBottom: 12,
               padding: 12,
@@ -222,19 +220,16 @@ export const App = () => {
             }}
           >
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <input
-                value={script.path}
-                onChange={(e) => updateScript(i, "path", e.target.value)}
-                placeholder="path"
-                style={{ flex: 1, fontFamily: "monospace", fontSize: 13 }}
-              />
-              <button type="button" onClick={() => removeScript(i)}>
+              <code style={{ flex: 1, fontFamily: "monospace", fontSize: 13 }}>
+                {path}
+              </code>
+              <button type="button" onClick={() => removeScript(path)}>
                 Remove
               </button>
             </div>
             <textarea
-              value={script.content}
-              onChange={(e) => updateScript(i, "content", e.target.value)}
+              value={content}
+              onChange={(e) => updateScriptContent(path, e.target.value)}
               rows={5}
               style={{
                 width: "100%",

@@ -2,30 +2,24 @@ import { describe, expect, it } from "vitest";
 import {
   assetEntrySchema,
   diagnosticSchema,
-  scriptEntrySchema,
+  scriptValueSchema,
 } from "./schema";
 
-describe("scriptEntrySchema", () => {
-  it("accepts valid script entries", () => {
-    const result = scriptEntrySchema.safeParse({
-      path: "src/main.ts",
+describe("scriptValueSchema", () => {
+  it("accepts valid script values", () => {
+    const result = scriptValueSchema.safeParse({
       content: 'console.log("hello")',
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects missing path", () => {
-    const result = scriptEntrySchema.safeParse({ content: "code" });
-    expect(result.success).toBe(false);
-  });
-
   it("rejects missing content", () => {
-    const result = scriptEntrySchema.safeParse({ path: "a.ts" });
+    const result = scriptValueSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 
   it("rejects wrong types", () => {
-    const result = scriptEntrySchema.safeParse({ path: 123, content: true });
+    const result = scriptValueSchema.safeParse({ content: 123 });
     expect(result.success).toBe(false);
   });
 });
