@@ -1,6 +1,6 @@
-import * as vscode from "vscode";
-import { type BridgePeer, createBridgePeer } from "@vibe-games-bridge/core";
+import { createBridgePeer } from "@vibe-games-bridge/core";
 import { bridgeSchema } from "@vibe-games-bridge/protocol";
+import * as vscode from "vscode";
 import { type WebSocket, WebSocketServer } from "ws";
 import { BridgeFileSystemProvider } from "./fileSystemProvider";
 
@@ -72,9 +72,7 @@ const startServer = (): void => {
     // When scripts change (from web app), update the file system
     peer.resources.scripts.subscribe((scripts) => {
       fsProvider.updateScripts(scripts);
-      outputChannel.appendLine(
-        `[bridge] Received ${scripts.length} script(s)`,
-      );
+      outputChannel.appendLine(`[bridge] Received ${scripts.length} script(s)`);
       mountWorkspaceFolder();
     });
 

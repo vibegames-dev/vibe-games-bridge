@@ -6,8 +6,9 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
   private scripts = new Map<string, ScriptEntry>();
   onScriptWrite: ((script: ScriptEntry) => void) | undefined;
 
-  private readonly _onDidChangeFile =
-    new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+  private readonly _onDidChangeFile = new vscode.EventEmitter<
+    vscode.FileChangeEvent[]
+  >();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
     this._onDidChangeFile.event;
 
@@ -61,7 +62,8 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
 
     for (const scriptPath of this.scripts.keys()) {
       if (dir === "" || scriptPath.startsWith(`${dir}/`)) {
-        const relative = dir === "" ? scriptPath : scriptPath.slice(dir.length + 1);
+        const relative =
+          dir === "" ? scriptPath : scriptPath.slice(dir.length + 1);
         const parts = relative.split("/");
         const name = parts[0]!;
 
@@ -95,13 +97,14 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     const script = this.scripts.get(path);
     if (!script) throw vscode.FileSystemError.FileNotFound(uri);
 
-    const updated = { ...script, content: Buffer.from(content).toString("utf8") };
+    const updated = {
+      ...script,
+      content: Buffer.from(content).toString("utf8"),
+    };
     this.scripts.set(path, updated);
     this.onScriptWrite?.(updated);
 
-    this._onDidChangeFile.fire([
-      { type: vscode.FileChangeType.Changed, uri },
-    ]);
+    this._onDidChangeFile.fire([{ type: vscode.FileChangeType.Changed, uri }]);
   }
 
   createDirectory(): void {

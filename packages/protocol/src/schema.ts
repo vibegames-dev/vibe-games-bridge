@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { defineBridgeSchema } from "@vibe-games-bridge/core";
+import { z } from "zod";
 
 // --- Resource item schemas ---
 

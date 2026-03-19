@@ -22,9 +22,11 @@ export const defineBridgeSchema = <
   R extends Record<string, z.ZodType>,
   E extends Record<string, z.ZodType>,
   Q extends Record<string, { params: z.ZodType; result: z.ZodType }>,
->(
-  schema: { resources: R; events: E; requests: Q },
-) => schema;
+>(schema: {
+  resources: R;
+  events: E;
+  requests: Q;
+}) => schema;
 
 // --- Type helpers ---
 
@@ -109,9 +111,9 @@ export const createBridgePeer = <
 
     switch (msg.kind) {
       case "resource:update": {
-        const observable = (
-          resources as Record<string, Observable<unknown>>
-        )[msg.key];
+        const observable = (resources as Record<string, Observable<unknown>>)[
+          msg.key
+        ];
         observable?.setValueWithoutNotify(msg.data);
         break;
       }

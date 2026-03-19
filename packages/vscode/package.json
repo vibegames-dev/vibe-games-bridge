@@ -16,8 +16,13 @@
   "engines": {
     "vscode": "^1.100.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished", "onUri"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
   "contributes": {
     "commands": [
       {

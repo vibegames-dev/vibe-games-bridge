@@ -1,6 +1,6 @@
 export {
-  bridgeSchema,
-  scriptEntrySchema,
   assetEntrySchema,
+  bridgeSchema,
   diagnosticSchema,
+  scriptEntrySchema,
 } from "./schema";
