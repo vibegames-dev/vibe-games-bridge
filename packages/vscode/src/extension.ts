@@ -10,6 +10,7 @@ const FS_SCHEME = "vibe-games";
 let wss: WebSocketServer | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
+let currentProjectId: string | undefined;
 const fsProvider = new BridgeFileSystemProvider();
 
 export const activate = (context: vscode.ExtensionContext): void => {
@@ -39,12 +40,29 @@ export const activate = (context: vscode.ExtensionContext): void => {
     },
   );
 
-  context.subscriptions.push(statusBarItem, fsRegistration, reconnectCmd, {
-    dispose: () => {
-      outputChannel.dispose();
-      wss?.close();
+  const uriHandler: vscode.UriHandler = {
+    handleUri: (uri: vscode.Uri) => {
+      const projectId =
+        new URLSearchParams(uri.query).get("projectId") ?? undefined;
+      currentProjectId = projectId;
+      outputChannel.appendLine(
+        `[bridge] URI opened${projectId ? ` (projectId: ${projectId})` : ""}`,
+      );
     },
-  });
+  };
+
+  context.subscriptions.push(
+    statusBarItem,
+    fsRegistration,
+    reconnectCmd,
+    vscode.window.registerUriHandler(uriHandler),
+    {
+      dispose: () => {
+        outputChannel.dispose();
+        wss?.close();
+      },
+    },
+  );
 };
 
 const startServer = (): void => {
@@ -63,16 +81,20 @@ const startServer = (): void => {
       bridgeSchema,
       {
         send: (data) => ws.send(data),
-        onMessage: (handler) =>
-          ws.on("message", (raw: Buffer) => handler(raw.toString())),
+        onMessage: (handler) => {
+          ws.on("message", (raw: Buffer) => {
+            outputChannel.appendLine(`[bridge] Raw message: ${raw.toString().slice(0, 200)}`);
+            handler(raw.toString());
+          });
+        },
       },
       { scripts: [], assets: [] },
     );
 
     // When scripts change (from web app), update the file system
     peer.resources.scripts.subscribe((scripts) => {
+      outputChannel.appendLine(`[bridge] Scripts subscribe fired: ${scripts.length} script(s)`);
       fsProvider.updateScripts(scripts);
-      outputChannel.appendLine(`[bridge] Received ${scripts.length} script(s)`);
       mountWorkspaceFolder();
     });
 
@@ -113,10 +135,13 @@ const mountWorkspaceFolder = (): void => {
     (f) => f.uri.scheme === FS_SCHEME,
   );
   if (!already) {
+    const folderName = currentProjectId
+      ? `Vibe Games Scripts (${currentProjectId})`
+      : "Vibe Games Scripts";
     vscode.workspace.updateWorkspaceFolders(
       vscode.workspace.workspaceFolders?.length ?? 0,
       null,
-      { uri, name: "Vibe Games Scripts" },
+      { uri, name: folderName },
     );
   }
 };

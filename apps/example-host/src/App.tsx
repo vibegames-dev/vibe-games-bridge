@@ -4,6 +4,7 @@ import { bridgeSchema } from "@vibe-games-bridge/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL = "ws://localhost:4567";
+const VSCODE_URI = "vscode://vibe-games-bridge.vscode/open?projectId=example-game";
 
 type Script = { path: string; content: string };
 type Peer = BridgePeer<
@@ -25,22 +26,26 @@ const initialScripts: Script[] = [
   },
 ];
 
-export function App() {
+export const App = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [scripts, setScripts] = useState<Script[]>(initialScripts);
   const [connected, setConnected] = useState(false);
   const [lastResponse, setLastResponse] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<Peer | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const log = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev, `[${time}] ${msg}`]);
   }, []);
 
-  useEffect(() => {
+  const connect = useCallback(() => {
+    if (wsRef.current) return;
+
     log("Connecting to bridge...");
     const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
 
     ws.addEventListener("message", (e) => {
       log(`\u2190 ${e.data}`);
@@ -82,11 +87,19 @@ export function App() {
       log("Disconnected");
       setConnected(false);
       peerRef.current = null;
+      wsRef.current = null;
     });
-    ws.addEventListener("error", () => log("Connection error"));
 
-    return () => ws.close();
+    ws.addEventListener("error", () => log("Connection error"));
   }, [log]);
+
+  const disconnect = useCallback(() => {
+    wsRef.current?.close();
+  }, []);
+
+  useEffect(() => {
+    return () => wsRef.current?.close();
+  }, []);
 
   useEffect(() => {
     if (logRef.current) {
@@ -94,15 +107,19 @@ export function App() {
     }
   });
 
-  function emitConsoleLog() {
+  const openVSCode = () => {
+    window.open(VSCODE_URI, "_blank");
+  };
+
+  const emitConsoleLog = () => {
     peerRef.current?.emit("console:log", {
       level: "info",
       message: "Hello from example host!",
       timestamp: new Date().toISOString(),
     });
-  }
+  };
 
-  function sendDialogRequest() {
+  const sendDialogRequest = () => {
     peerRef.current
       ?.request("dialog:open", {
         title: "Test Dialog",
@@ -110,9 +127,9 @@ export function App() {
       })
       .then((res) => setLastResponse(JSON.stringify(res)))
       .catch((err: unknown) => setLastResponse(`Error: ${err}`));
-  }
+  };
 
-  function updateScript(index: number, field: keyof Script, value: string) {
+  const updateScript = (index: number, field: keyof Script, value: string) => {
     setScripts((prev) => {
       const next = prev.map((s, i) =>
         i === index ? { ...s, [field]: value } : s,
@@ -120,23 +137,23 @@ export function App() {
       peerRef.current?.resources.scripts.setValue(next);
       return next;
     });
-  }
+  };
 
-  function addScript() {
+  const addScript = () => {
     setScripts((prev) => {
       const next = [...prev, { path: "scripts/new.ts", content: "" }];
       peerRef.current?.resources.scripts.setValue(next);
       return next;
     });
-  }
+  };
 
-  function removeScript(index: number) {
+  const removeScript = (index: number) => {
     setScripts((prev) => {
       const next = prev.filter((_, i) => i !== index);
       peerRef.current?.resources.scripts.setValue(next);
       return next;
     });
-  }
+  };
 
   return (
     <div
@@ -148,9 +165,26 @@ export function App() {
       }}
     >
       <h1>Vibe Games Bridge</h1>
-      <p>
-        {connected ? "Connected" : "Connecting"} to <code>{WS_URL}</code>
-      </p>
+
+      <Section title="Connection">
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" onClick={openVSCode}>
+            Open VS Code
+          </button>
+          {connected ? (
+            <button type="button" onClick={disconnect}>
+              Disconnect
+            </button>
+          ) : (
+            <button type="button" onClick={connect}>
+              Connect
+            </button>
+          )}
+          <span style={{ fontSize: 13, color: connected ? "#0a0" : "#888" }}>
+            {connected ? "Connected" : "Disconnected"}
+          </span>
+        </div>
+      </Section>
 
       <Section title="Actions">
         <div style={{ display: "flex", gap: 8 }}>
@@ -235,19 +269,19 @@ export function App() {
       </Section>
     </div>
   );
-}
+};
 
-function Section({
+const Section = ({
   title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
-}) {
+}) => {
   return (
     <div style={{ marginTop: 24 }}>
       <h3 style={{ marginBottom: 8 }}>{title}</h3>
       {children}
     </div>
   );
-}
+};

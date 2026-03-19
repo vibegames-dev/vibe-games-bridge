@@ -77,11 +77,14 @@ export const createBridgePeer = <
   };
 
   // Resources — observable per key, synced over wire
+  let receivingFromWire = false;
   const resources = {} as ResourceObservables<R>;
   for (const key in schema.resources) {
     const observable = new Observable(initialResources[key]);
     observable.subscribe((data) => {
-      sendWire({ kind: "resource:update", key, data });
+      if (!receivingFromWire) {
+        sendWire({ kind: "resource:update", key, data });
+      }
     });
     // biome-ignore lint: generic boundary cast
     (resources as any)[key] = observable;
@@ -114,7 +117,9 @@ export const createBridgePeer = <
         const observable = (resources as Record<string, Observable<unknown>>)[
           msg.key
         ];
-        observable?.setValueWithoutNotify(msg.data);
+        receivingFromWire = true;
+        observable?.setValue(msg.data);
+        receivingFromWire = false;
         break;
       }
 

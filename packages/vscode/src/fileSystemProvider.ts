@@ -13,16 +13,37 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     this._onDidChangeFile.event;
 
   updateScripts(scripts: ScriptEntry[]): void {
+    const oldPaths = new Set(this.scripts.keys());
+    const newPaths = new Set(scripts.map((s) => s.path));
+
+    const events: vscode.FileChangeEvent[] = [];
+
+    for (const script of scripts) {
+      const uri = vscode.Uri.parse(`vibe-games:/${script.path}`);
+      if (oldPaths.has(script.path)) {
+        events.push({ type: vscode.FileChangeType.Changed, uri });
+      } else {
+        events.push({ type: vscode.FileChangeType.Created, uri });
+      }
+    }
+
+    for (const oldPath of oldPaths) {
+      if (!newPaths.has(oldPath)) {
+        events.push({
+          type: vscode.FileChangeType.Deleted,
+          uri: vscode.Uri.parse(`vibe-games:/${oldPath}`),
+        });
+      }
+    }
+
     this.scripts.clear();
     for (const script of scripts) {
       this.scripts.set(script.path, script);
     }
-    this._onDidChangeFile.fire([
-      {
-        type: vscode.FileChangeType.Changed,
-        uri: vscode.Uri.parse("vibe-games:/"),
-      },
-    ]);
+
+    if (events.length > 0) {
+      this._onDidChangeFile.fire(events);
+    }
   }
 
   watch(): vscode.Disposable {
