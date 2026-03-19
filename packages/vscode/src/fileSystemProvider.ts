@@ -3,8 +3,23 @@ import * as vscode from "vscode";
 export type ScriptValue = { content: string };
 export type ScriptsRecord = Record<string, ScriptValue>;
 
+const JS_EXT = ".js";
+export const toFsPath = (key: string): string =>
+  key.endsWith(JS_EXT) ? key : `${key}${JS_EXT}`;
+
 export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
   private scripts = new Map<string, ScriptValue>();
+
+  // Resolve a FS path to its bridge key. Tries exact match first (for keys
+  // that already end in .js), then falls back to stripping the added .js.
+  private resolveKey(fsPath: string): string | undefined {
+    if (this.scripts.has(fsPath)) return fsPath;
+    if (fsPath.endsWith(JS_EXT)) {
+      const stripped = fsPath.slice(0, -JS_EXT.length);
+      if (this.scripts.has(stripped)) return stripped;
+    }
+    return undefined;
+  }
   onScriptWrite: ((path: string, value: ScriptValue) => void) | undefined;
   onScriptDelete: ((path: string) => void) | undefined;
 
@@ -15,32 +30,34 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     this._onDidChangeFile.event;
 
   updateScripts(scripts: ScriptsRecord): void {
-    const oldPaths = new Set(this.scripts.keys());
-    const newPaths = new Set(Object.keys(scripts));
+    const oldKeys = new Set(this.scripts.keys());
+    const newKeys = new Set(Object.keys(scripts));
 
     const events: vscode.FileChangeEvent[] = [];
 
-    for (const path of Object.keys(scripts)) {
-      const uri = vscode.Uri.parse(`vibe-games:/${path}`);
-      if (oldPaths.has(path)) {
-        events.push({ type: vscode.FileChangeType.Changed, uri });
+    for (const key of newKeys) {
+      const uri = vscode.Uri.parse(`vibe-games:/${toFsPath(key)}`);
+      if (oldKeys.has(key)) {
+        if (this.scripts.get(key)?.content !== scripts[key]?.content) {
+          events.push({ type: vscode.FileChangeType.Changed, uri });
+        }
       } else {
         events.push({ type: vscode.FileChangeType.Created, uri });
       }
     }
 
-    for (const oldPath of oldPaths) {
-      if (!newPaths.has(oldPath)) {
+    for (const oldKey of oldKeys) {
+      if (!newKeys.has(oldKey)) {
         events.push({
           type: vscode.FileChangeType.Deleted,
-          uri: vscode.Uri.parse(`vibe-games:/${oldPath}`),
+          uri: vscode.Uri.parse(`vibe-games:/${toFsPath(oldKey)}`),
         });
       }
     }
 
     this.scripts.clear();
-    for (const [path, value] of Object.entries(scripts)) {
-      this.scripts.set(path, value);
+    for (const [key, value] of Object.entries(scripts)) {
+      this.scripts.set(key, value);
     }
 
     if (events.length > 0) {
@@ -54,9 +71,9 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
 
   stat(uri: vscode.Uri): vscode.FileStat {
     const now = Date.now();
-    const path = uri.path.replace(/^\//, "");
+    const fsPath = uri.path.replace(/^\//, "");
 
-    if (path === "" || this.isDirectory(path)) {
+    if (fsPath === "" || this.isDirectory(fsPath)) {
       return {
         type: vscode.FileType.Directory,
         ctime: now,
@@ -65,7 +82,8 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
       };
     }
 
-    const script = this.scripts.get(path);
+    const key = this.resolveKey(fsPath);
+    const script = key != null ? this.scripts.get(key) : undefined;
     if (script) {
       return {
         type: vscode.FileType.File,
@@ -83,10 +101,10 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     const entries: [string, vscode.FileType][] = [];
     const seen = new Set<string>();
 
-    for (const scriptPath of this.scripts.keys()) {
-      if (dir === "" || scriptPath.startsWith(`${dir}/`)) {
-        const relative =
-          dir === "" ? scriptPath : scriptPath.slice(dir.length + 1);
+    for (const key of this.scripts.keys()) {
+      const fsPath = toFsPath(key);
+      if (dir === "" || fsPath.startsWith(`${dir}/`)) {
+        const relative = dir === "" ? fsPath : fsPath.slice(dir.length + 1);
         const parts = relative.split("/");
         const name = parts[0]!;
 
@@ -105,8 +123,8 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   readFile(uri: vscode.Uri): Uint8Array {
-    const path = uri.path.replace(/^\//, "");
-    const script = this.scripts.get(path);
+    const key = this.resolveKey(uri.path.replace(/^\//, ""));
+    const script = key != null ? this.scripts.get(key) : undefined;
     if (!script) throw vscode.FileSystemError.FileNotFound(uri);
     return Buffer.from(script.content, "utf8");
   }
@@ -116,23 +134,25 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     content: Uint8Array,
     options: { create: boolean; overwrite: boolean },
   ): void {
-    const path = uri.path.replace(/^\//, "");
-    const exists = this.scripts.has(path);
+    const fsPath = uri.path.replace(/^\//, "");
+    const existingKey = this.resolveKey(fsPath);
 
-    if (!exists && !options.create) {
+    if (!existingKey && !options.create) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    if (exists && !options.overwrite) {
+    if (existingKey && !options.overwrite) {
       throw vscode.FileSystemError.FileExists(uri);
     }
 
+    // Use existing key if overwriting, otherwise derive from FS path
+    const key = existingKey ?? fsPath;
     const value = { content: Buffer.from(content).toString("utf8") };
-    this.scripts.set(path, value);
-    this.onScriptWrite?.(path, value);
+    this.scripts.set(key, value);
+    this.onScriptWrite?.(key, value);
 
     this._onDidChangeFile.fire([
       {
-        type: exists
+        type: existingKey
           ? vscode.FileChangeType.Changed
           : vscode.FileChangeType.Created,
         uri,
@@ -147,12 +167,13 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   delete(uri: vscode.Uri): void {
-    const path = uri.path.replace(/^\//, "");
+    const fsPath = uri.path.replace(/^\//, "");
+    const key = this.resolveKey(fsPath);
 
     // Single file delete
-    if (this.scripts.has(path)) {
-      this.scripts.delete(path);
-      this.onScriptDelete?.(path);
+    if (key != null) {
+      this.scripts.delete(key);
+      this.onScriptDelete?.(key);
       this._onDidChangeFile.fire([
         { type: vscode.FileChangeType.Deleted, uri },
       ]);
@@ -160,20 +181,20 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     }
 
     // Directory delete — remove all scripts under this prefix
-    const prefix = `${path}/`;
+    const prefix = `${fsPath}/`;
     const toDelete = [...this.scripts.keys()].filter((k) =>
-      k.startsWith(prefix),
+      toFsPath(k).startsWith(prefix),
     );
     if (toDelete.length === 0) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     const events: vscode.FileChangeEvent[] = [];
-    for (const scriptPath of toDelete) {
-      this.scripts.delete(scriptPath);
-      this.onScriptDelete?.(scriptPath);
+    for (const scriptKey of toDelete) {
+      this.scripts.delete(scriptKey);
+      this.onScriptDelete?.(scriptKey);
       events.push({
         type: vscode.FileChangeType.Deleted,
-        uri: vscode.Uri.parse(`vibe-games:/${scriptPath}`),
+        uri: vscode.Uri.parse(`vibe-games:/${toFsPath(scriptKey)}`),
       });
     }
     this._onDidChangeFile.fire(events);
@@ -184,19 +205,20 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     newUri: vscode.Uri,
     options: { overwrite: boolean },
   ): void {
-    const oldPath = oldUri.path.replace(/^\//, "");
-    const newPath = newUri.path.replace(/^\//, "");
+    const oldKey = this.resolveKey(oldUri.path.replace(/^\//, ""));
+    const newFsPath = newUri.path.replace(/^\//, "");
 
     // Single file rename
-    const script = this.scripts.get(oldPath);
-    if (script) {
-      if (this.scripts.has(newPath) && !options.overwrite) {
+    const script = oldKey != null ? this.scripts.get(oldKey) : undefined;
+    if (oldKey != null && script) {
+      const newKey = this.resolveKey(newFsPath) ?? newFsPath;
+      if (this.scripts.has(newKey) && !options.overwrite) {
         throw vscode.FileSystemError.FileExists(newUri);
       }
-      this.scripts.delete(oldPath);
-      this.scripts.set(newPath, script);
-      this.onScriptDelete?.(oldPath);
-      this.onScriptWrite?.(newPath, script);
+      this.scripts.delete(oldKey);
+      this.scripts.set(newKey, script);
+      this.onScriptDelete?.(oldKey);
+      this.onScriptWrite?.(newKey, script);
       this._onDidChangeFile.fire([
         { type: vscode.FileChangeType.Deleted, uri: oldUri },
         { type: vscode.FileChangeType.Created, uri: newUri },
@@ -205,38 +227,41 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     }
 
     // Directory rename — move all scripts under this prefix
-    const oldPrefix = `${oldPath}/`;
+    const oldFsPrefix = `${oldUri.path.replace(/^\//, "")}/`;
     const toMove = [...this.scripts.entries()].filter(([k]) =>
-      k.startsWith(oldPrefix),
+      toFsPath(k).startsWith(oldFsPrefix),
     );
     if (toMove.length === 0) {
       throw vscode.FileSystemError.FileNotFound(oldUri);
     }
     const events: vscode.FileChangeEvent[] = [];
-    for (const [scriptPath, value] of toMove) {
-      const renamed = newPath + scriptPath.slice(oldPath.length);
-      this.scripts.delete(scriptPath);
-      this.scripts.set(renamed, value);
-      this.onScriptDelete?.(scriptPath);
-      this.onScriptWrite?.(renamed, value);
+    const newFsDir = newUri.path.replace(/^\//, "");
+    for (const [scriptKey, value] of toMove) {
+      const oldFsPath = toFsPath(scriptKey);
+      const newFsPath = `${newFsDir}/${oldFsPath.slice(oldFsPrefix.length)}`;
+      const renamedKey = this.resolveKey(newFsPath) ?? newFsPath;
+      this.scripts.delete(scriptKey);
+      this.scripts.set(renamedKey, value);
+      this.onScriptDelete?.(scriptKey);
+      this.onScriptWrite?.(renamedKey, value);
       events.push(
         {
           type: vscode.FileChangeType.Deleted,
-          uri: vscode.Uri.parse(`vibe-games:/${scriptPath}`),
+          uri: vscode.Uri.parse(`vibe-games:/${oldFsPath}`),
         },
         {
           type: vscode.FileChangeType.Created,
-          uri: vscode.Uri.parse(`vibe-games:/${renamed}`),
+          uri: vscode.Uri.parse(`vibe-games:/${newFsPath}`),
         },
       );
     }
     this._onDidChangeFile.fire(events);
   }
 
-  private isDirectory(path: string): boolean {
-    const prefix = `${path}/`;
+  private isDirectory(fsPath: string): boolean {
+    const prefix = `${fsPath}/`;
     for (const key of this.scripts.keys()) {
-      if (key.startsWith(prefix)) return true;
+      if (toFsPath(key).startsWith(prefix)) return true;
     }
     return false;
   }

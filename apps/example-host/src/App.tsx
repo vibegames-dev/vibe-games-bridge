@@ -4,6 +4,8 @@ import { bridgeSchema } from "@vibe-games-bridge/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL = "ws://localhost:4567";
+const MAX_RETRIES = 5;
+const RETRY_BASE_MS = 300;
 const VSCODE_URI =
   "vscode://vibe-games-bridge.vscode/open?projectId=example-game";
 
@@ -33,75 +35,114 @@ export const App = () => {
   const logRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<Peer | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectingRef = useRef(false);
 
   const log = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev, `[${time}] ${msg}`]);
   }, []);
 
-  const connect = useCallback(() => {
-    if (wsRef.current) return;
+  const attemptConnect = useCallback(
+    (retry = 0) => {
+      if (wsRef.current) return;
+      connectingRef.current = true;
 
-    log("Connecting to bridge...");
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
+      if (retry === 0) log("Connecting to bridge...");
+      else log(`Retrying (${retry}/${MAX_RETRIES})...`);
 
-    ws.addEventListener("message", (e) => {
-      log(`\u2190 ${e.data}`);
-    });
+      const ws = new WebSocket(WS_URL);
+      let opened = false;
 
-    ws.addEventListener("open", () => {
-      log("Connected");
-      setConnected(true);
+      ws.addEventListener("message", (e) => {
+        log(`\u2190 ${e.data}`);
+      });
 
-      const peer = createBridgePeer(
-        bridgeSchema,
-        {
-          send: (data) => {
-            log(`\u2192 ${data}`);
-            ws.send(data);
+      ws.addEventListener("open", () => {
+        opened = true;
+        connectingRef.current = false;
+        wsRef.current = ws;
+        log("Connected");
+        setConnected(true);
+
+        const peer = createBridgePeer(
+          bridgeSchema,
+          {
+            send: (data) => {
+              log(`\u2192 ${data}`);
+              ws.send(data);
+            },
+            onMessage: (handler) =>
+              ws.addEventListener("message", (e) => handler(e.data)),
           },
-          onMessage: (handler) =>
-            ws.addEventListener("message", (e) => handler(e.data)),
-        },
-        { scripts: initialScripts, assets: [] },
-      );
+          { scripts: initialScripts },
+        );
 
-      peer.onRequest("script:run", async ({ path }) => {
-        log(`Running script: ${path}`);
-        return { success: true, output: `Executed ${path}` };
+        peer.onRequest("script:run", async ({ path }) => {
+          log(`Running script: ${path}`);
+          return { success: true, output: `Executed ${path}` };
+        });
+
+        peer.onRequest("dialog:open", async ({ title, body }) => {
+          log(`Dialog: ${title} - ${body}`);
+          return { confirmed: true };
+        });
+
+        peer.resources.scripts.setValue(initialScripts);
+        peer.resources.scripts.subscribe((scripts) => {
+          setScripts(scripts);
+        });
+        peerRef.current = peer;
+        log("Bridge peer ready");
       });
 
-      peer.onRequest("dialog:open", async ({ title, body }) => {
-        log(`Dialog: ${title} - ${body}`);
-        return { confirmed: true };
+      ws.addEventListener("close", () => {
+        if (!opened && retry < MAX_RETRIES) {
+          const delay = RETRY_BASE_MS * 2 ** retry;
+          retryTimerRef.current = setTimeout(
+            () => attemptConnect(retry + 1),
+            delay,
+          );
+          return;
+        }
+        connectingRef.current = false;
+        log("Disconnected");
+        setConnected(false);
+        peerRef.current = null;
+        wsRef.current = null;
       });
 
-      peer.resources.scripts.setValue(initialScripts);
-      peer.resources.scripts.subscribe((scripts) => {
-        setScripts(scripts);
+      ws.addEventListener("error", () => {
+        if (opened) log("Connection error");
       });
-      peerRef.current = peer;
-      log("Bridge peer ready");
-    });
+    },
+    [log],
+  );
 
-    ws.addEventListener("close", () => {
-      log("Disconnected");
-      setConnected(false);
-      peerRef.current = null;
-      wsRef.current = null;
-    });
+  const connect = useCallback(() => {
+    if (wsRef.current || connectingRef.current) return;
+    attemptConnect(0);
+  }, [attemptConnect]);
 
-    ws.addEventListener("error", () => log("Connection error"));
-  }, [log]);
+  const cancelRetry = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    connectingRef.current = false;
+  }, []);
 
   const disconnect = useCallback(() => {
+    cancelRetry();
     wsRef.current?.close();
-  }, []);
+  }, [cancelRetry]);
 
   useEffect(() => {
-    return () => wsRef.current?.close();
-  }, []);
+    return () => {
+      cancelRetry();
+      wsRef.current?.close();
+    };
+  }, [cancelRetry]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -119,6 +160,37 @@ export const App = () => {
       message: "Hello from example host!",
       timestamp: new Date().toISOString(),
     });
+  };
+
+  const emitDiagnostics = () => {
+    const paths = Object.keys(scripts);
+    const path = paths[Math.floor(Math.random() * paths.length)];
+    if (!path) return;
+
+    const messages = [
+      "Unexpected token: missing semicolon",
+      "Cannot find name 'foo'",
+      "Type 'string' is not assignable to type 'number'",
+      "Property 'bar' does not exist on type '{}'",
+      "Unused variable 'x'",
+      "Expected 2 arguments, but got 1",
+      "'await' has no effect on this expression",
+      "Object is possibly 'undefined'",
+    ];
+    const severities = ["error", "warning", "info", "hint"] as const;
+    const content = scripts[path]?.content ?? "";
+    const lineCount = Math.max(1, content.split("\n").length);
+    const count = 1 + Math.floor(Math.random() * 3);
+
+    const diagnostics = Array.from({ length: count }, () => ({
+      path,
+      severity: severities[Math.floor(Math.random() * severities.length)]!,
+      message: messages[Math.floor(Math.random() * messages.length)]!,
+      line: Math.floor(Math.random() * lineCount),
+      column: Math.floor(Math.random() * 20),
+    }));
+
+    peerRef.current?.emit("diagnostics:update", { path, diagnostics });
   };
 
   const sendDialogRequest = () => {
@@ -199,6 +271,9 @@ export const App = () => {
             onClick={sendDialogRequest}
           >
             Request dialog:open
+          </button>
+          <button type="button" disabled={!connected} onClick={emitDiagnostics}>
+            Emit diagnostics
           </button>
         </div>
         {lastResponse && (

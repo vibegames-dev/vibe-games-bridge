@@ -7,12 +7,6 @@ export const scriptValueSchema = z.object({
   content: z.string(),
 });
 
-export const assetEntrySchema = z.object({
-  path: z.string(),
-  size: z.number(),
-  type: z.string(),
-});
-
 // --- Diagnostic schema ---
 
 export const diagnosticSchema = z.object({
@@ -28,7 +22,6 @@ export const diagnosticSchema = z.object({
 export const bridgeSchema = defineBridgeSchema({
   resources: {
     scripts: z.record(z.string(), scriptValueSchema),
-    assets: z.array(assetEntrySchema),
   },
   events: {
     "console:log": z.object({

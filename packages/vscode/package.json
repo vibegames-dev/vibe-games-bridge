@@ -29,7 +29,17 @@
         "command": "vibeGamesBridge.reconnect",
         "title": "Vibe Games: Reconnect"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Vibe Games Bridge",
+      "properties": {
+        "vibeGamesBridge.port": {
+          "type": "number",
+          "default": 4567,
+          "description": "WebSocket server port for the Vibe Games bridge."
+        }
+      }
+    }
   },
   "dependencies": {
     "@vibe-games-bridge/core": "workspace:*",

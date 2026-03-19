@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assetEntrySchema,
-  diagnosticSchema,
-  scriptValueSchema,
-} from "./schema";
+import { diagnosticSchema, scriptValueSchema } from "./schema";
 
 describe("scriptValueSchema", () => {
   it("accepts valid script values", () => {
@@ -20,31 +16,6 @@ describe("scriptValueSchema", () => {
 
   it("rejects wrong types", () => {
     const result = scriptValueSchema.safeParse({ content: 123 });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe("assetEntrySchema", () => {
-  it("accepts valid asset entries", () => {
-    const result = assetEntrySchema.safeParse({
-      path: "images/logo.png",
-      size: 1024,
-      type: "image/png",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects missing fields", () => {
-    const result = assetEntrySchema.safeParse({ path: "a.png" });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects non-number size", () => {
-    const result = assetEntrySchema.safeParse({
-      path: "a.png",
-      size: "big",
-      type: "image/png",
-    });
     expect(result.success).toBe(false);
   });
 });
