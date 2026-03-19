@@ -80,6 +80,9 @@ export const App = () => {
       });
 
       peer.resources.scripts.setValue(initialScripts);
+      peer.resources.scripts.subscribe((scripts) => {
+        setScripts(scripts);
+      });
       peerRef.current = peer;
       log("Bridge peer ready");
     });
