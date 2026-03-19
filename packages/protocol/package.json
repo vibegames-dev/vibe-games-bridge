@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vibe-games-bridge/core": "workspace:*",
@@ -12,7 +13,8 @@
   },
   "devDependencies": {
     "@vibe-games-bridge/config": "workspace:*",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
   },
   "exports": {
     ".": "./src/index.ts"

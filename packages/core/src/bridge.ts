@@ -166,6 +166,11 @@ export const createBridgePeer = <
     }
   });
 
+  // Broadcast initial resource values so the remote peer is in sync
+  for (const key in schema.resources) {
+    sendWire({ kind: "resource:update", key, data: initialResources[key] });
+  }
+
   return {
     resources,
 

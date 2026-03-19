@@ -4,7 +4,8 @@ import { bridgeSchema } from "@vibe-games-bridge/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL = "ws://localhost:4567";
-const VSCODE_URI = "vscode://vibe-games-bridge.vscode/open?projectId=example-game";
+const VSCODE_URI =
+  "vscode://vibe-games-bridge.vscode/open?projectId=example-game";
 
 type Script = { path: string; content: string };
 type Peer = BridgePeer<

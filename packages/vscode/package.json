@@ -11,7 +11,7 @@
     "dev": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "vscode:prepublish": "pnpm run build",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "engines": {
     "vscode": "^1.100.0"

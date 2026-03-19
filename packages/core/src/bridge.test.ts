@@ -1,0 +1,297 @@
+import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { createBridgePeer, defineBridgeSchema, type Transport } from "./bridge";
+
+const testSchema = defineBridgeSchema({
+  resources: {
+    counter: z.number(),
+    label: z.string(),
+  },
+  events: {
+    ping: z.object({ ts: z.number() }),
+  },
+  requests: {
+    add: {
+      params: z.object({ a: z.number(), b: z.number() }),
+      result: z.object({ sum: z.number() }),
+    },
+  },
+});
+
+function createMockTransport(): Transport & {
+  simulateIncoming: (msg: unknown) => void;
+  sent: unknown[];
+} {
+  let handler: ((data: string) => void) | null = null;
+  const sent: unknown[] = [];
+  return {
+    send(data: string) {
+      sent.push(JSON.parse(data));
+    },
+    onMessage(h) {
+      handler = h;
+    },
+    simulateIncoming(msg: unknown) {
+      handler?.(JSON.stringify(msg));
+    },
+    sent,
+  };
+}
+
+describe("createBridgePeer", () => {
+  describe("resources", () => {
+    it("initializes resources with provided values", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "hello",
+      });
+
+      expect(peer.resources.counter.getValue()).toBe(0);
+      expect(peer.resources.label.getValue()).toBe("hello");
+    });
+
+    it("sends resource:update over wire when resource changes locally", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "hi",
+      });
+
+      peer.resources.counter.setValue(5);
+
+      expect(transport.sent).toContainEqual({
+        kind: "resource:update",
+        key: "counter",
+        data: 5,
+      });
+    });
+
+    it("updates resource when receiving resource:update from wire", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "hi",
+      });
+
+      transport.simulateIncoming({
+        kind: "resource:update",
+        key: "counter",
+        data: 42,
+      });
+
+      expect(peer.resources.counter.getValue()).toBe(42);
+    });
+
+    it("does not echo resource:update back to wire (no infinite loop)", () => {
+      const transport = createMockTransport();
+      createBridgePeer(testSchema, transport, { counter: 0, label: "hi" });
+
+      const sentBefore = transport.sent.length;
+      transport.simulateIncoming({
+        kind: "resource:update",
+        key: "counter",
+        data: 10,
+      });
+
+      expect(transport.sent.length).toBe(sentBefore);
+    });
+  });
+
+  describe("events", () => {
+    it("sends events over wire via emit", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      peer.emit("ping", { ts: 123 });
+
+      expect(transport.sent).toContainEqual({
+        kind: "event",
+        type: "ping",
+        payload: { ts: 123 },
+      });
+    });
+
+    it("delivers incoming events to registered listeners", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      const listener = vi.fn();
+      peer.on("ping", listener);
+
+      transport.simulateIncoming({
+        kind: "event",
+        type: "ping",
+        payload: { ts: 456 },
+      });
+
+      expect(listener).toHaveBeenCalledWith({ ts: 456 });
+    });
+
+    it("supports multiple listeners for the same event", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
+      peer.on("ping", listener1);
+      peer.on("ping", listener2);
+
+      transport.simulateIncoming({
+        kind: "event",
+        type: "ping",
+        payload: { ts: 1 },
+      });
+
+      expect(listener1).toHaveBeenCalledWith({ ts: 1 });
+      expect(listener2).toHaveBeenCalledWith({ ts: 1 });
+    });
+  });
+
+  describe("requests", () => {
+    it("sends request over wire and resolves on response", async () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      const promise = peer.request("add", { a: 2, b: 3 });
+
+      // Find the sent request to get its id
+      const sentReq = transport.sent.find(
+        (m) => (m as Record<string, unknown>).kind === "request",
+      ) as Record<string, unknown>;
+      expect(sentReq).toBeDefined();
+      expect(sentReq.type).toBe("add");
+      expect(sentReq.params).toEqual({ a: 2, b: 3 });
+
+      // Simulate response
+      transport.simulateIncoming({
+        kind: "response",
+        id: sentReq.id,
+        result: { sum: 5 },
+      });
+
+      const result = await promise;
+      expect(result).toEqual({ sum: 5 });
+    });
+
+    it("rejects on error response", async () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      const promise = peer.request("add", { a: 1, b: 1 });
+      const sentReq = transport.sent.find(
+        (m) => (m as Record<string, unknown>).kind === "request",
+      ) as Record<string, unknown>;
+
+      transport.simulateIncoming({
+        kind: "response",
+        id: sentReq.id,
+        error: "something went wrong",
+      });
+
+      await expect(promise).rejects.toThrow("something went wrong");
+    });
+
+    it("handles incoming requests via onRequest", async () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      peer.onRequest("add", async (params) => ({
+        sum: params.a + params.b,
+      }));
+
+      transport.simulateIncoming({
+        kind: "request",
+        id: "req-1",
+        type: "add",
+        params: { a: 10, b: 20 },
+      });
+
+      // Wait for async handler to complete
+      await vi.waitFor(() => {
+        expect(transport.sent).toContainEqual({
+          kind: "response",
+          id: "req-1",
+          result: { sum: 30 },
+        });
+      });
+    });
+
+    it("sends error response when handler throws", async () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      peer.onRequest("add", async () => {
+        throw new Error("handler failed");
+      });
+
+      transport.simulateIncoming({
+        kind: "request",
+        id: "req-2",
+        type: "add",
+        params: { a: 0, b: 0 },
+      });
+
+      await vi.waitFor(() => {
+        expect(transport.sent).toContainEqual({
+          kind: "response",
+          id: "req-2",
+          error: "Error: handler failed",
+        });
+      });
+    });
+
+    it("sends error response when no handler is registered", async () => {
+      const transport = createMockTransport();
+      createBridgePeer(testSchema, transport, { counter: 0, label: "" });
+
+      transport.simulateIncoming({
+        kind: "request",
+        id: "req-3",
+        type: "add",
+        params: { a: 0, b: 0 },
+      });
+
+      expect(transport.sent).toContainEqual({
+        kind: "response",
+        id: "req-3",
+        error: "No handler for: add",
+      });
+    });
+  });
+
+  describe("wire protocol edge cases", () => {
+    it("ignores malformed JSON messages", () => {
+      const transport = createMockTransport();
+      const peer = createBridgePeer(testSchema, transport, {
+        counter: 0,
+        label: "",
+      });
+
+      // Should not throw — pass raw invalid JSON string
+      transport.simulateIncoming("not valid json" as unknown);
+      expect(peer.resources.counter.getValue()).toBe(0);
+    });
+  });
+});

@@ -11,7 +11,9 @@
     "format-and-lint": "biome check .",
     "format-and-lint:fix": "biome check . --write",
     "check-types": "turbo check-types",
-    "validate": "pnpm format-and-lint && pnpm check-types"
+    "test:unit": "turbo test",
+    "validate": "pnpm format-and-lint && pnpm check-types && pnpm test:unit",
+    "validate:fix": "pnpm format-and-lint:fix && pnpm check-types && pnpm test:unit"
   },
   "author": "Mateusz Migas",
   "license": "MIT",

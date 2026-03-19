@@ -83,7 +83,9 @@ const startServer = (): void => {
         send: (data) => ws.send(data),
         onMessage: (handler) => {
           ws.on("message", (raw: Buffer) => {
-            outputChannel.appendLine(`[bridge] Raw message: ${raw.toString().slice(0, 200)}`);
+            outputChannel.appendLine(
+              `[bridge] Raw message: ${raw.toString().slice(0, 200)}`,
+            );
             handler(raw.toString());
           });
         },
@@ -93,7 +95,9 @@ const startServer = (): void => {
 
     // When scripts change (from web app), update the file system
     peer.resources.scripts.subscribe((scripts) => {
-      outputChannel.appendLine(`[bridge] Scripts subscribe fired: ${scripts.length} script(s)`);
+      outputChannel.appendLine(
+        `[bridge] Scripts subscribe fired: ${scripts.length} script(s)`,
+      );
       fsProvider.updateScripts(scripts);
       mountWorkspaceFolder();
     });
@@ -136,8 +140,8 @@ const mountWorkspaceFolder = (): void => {
   );
   if (!already) {
     const folderName = currentProjectId
-      ? `Vibe Games Scripts (${currentProjectId})`
-      : "Vibe Games Scripts";
+      ? `Vibe Games: (${currentProjectId})`
+      : "Vibe Games 2";
     vscode.workspace.updateWorkspaceFolders(
       vscode.workspace.workspaceFolders?.length ?? 0,
       null,
