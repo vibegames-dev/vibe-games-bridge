@@ -27,6 +27,7 @@
     ]
   },
   "dependencies": {
+    "@vibe-games-bridge/core": "workspace:*",
     "@vibe-games-bridge/protocol": "workspace:*",
     "ws": "^8.18.0"
   },

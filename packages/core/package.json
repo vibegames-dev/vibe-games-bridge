@@ -1,5 +1,5 @@
 {
-  "name": "@vibe-games-bridge/host",
+  "name": "@vibe-games-bridge/core",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@vibe-games-bridge/protocol": "workspace:*"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@vibe-games-bridge/config": "workspace:*",

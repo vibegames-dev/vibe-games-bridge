@@ -1,10 +1,8 @@
 import * as vscode from "vscode";
+import { type BridgePeer, createBridgePeer } from "@vibe-games-bridge/core";
+import { bridgeSchema } from "@vibe-games-bridge/protocol";
 import { type WebSocket, WebSocketServer } from "ws";
-import {
-  BridgeFileSystemProvider,
-  type BridgeScript,
-} from "./fileSystemProvider";
-import { OutputChannelBridge } from "./outputChannelBridge";
+import { BridgeFileSystemProvider } from "./fileSystemProvider";
 
 const PORT = 4567;
 const FS_SCHEME = "vibe-games";
@@ -12,10 +10,9 @@ const FS_SCHEME = "vibe-games";
 let wss: WebSocketServer | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
-const outputChannelBridge = new OutputChannelBridge();
 const fsProvider = new BridgeFileSystemProvider();
 
-export function activate(context: vscode.ExtensionContext): void {
+export const activate = (context: vscode.ExtensionContext): void => {
   outputChannel = vscode.window.createOutputChannel("Vibe Games Bridge");
 
   const fsRegistration = vscode.workspace.registerFileSystemProvider(
@@ -48,9 +45,9 @@ export function activate(context: vscode.ExtensionContext): void {
       wss?.close();
     },
   });
-}
+};
 
-function startServer(): void {
+const startServer = (): void => {
   wss = new WebSocketServer({ port: PORT });
 
   wss.on("listening", () => {
@@ -62,18 +59,37 @@ function startServer(): void {
     setStatusBar("connected");
     outputChannel.appendLine("[bridge] Browser connected");
 
+    const peer = createBridgePeer(
+      bridgeSchema,
+      {
+        send: (data) => ws.send(data),
+        onMessage: (handler) =>
+          ws.on("message", (raw: Buffer) => handler(raw.toString())),
+      },
+      { scripts: [], assets: [] },
+    );
+
+    // When scripts change (from web app), update the file system
+    peer.resources.scripts.subscribe((scripts) => {
+      fsProvider.updateScripts(scripts);
+      outputChannel.appendLine(
+        `[bridge] Received ${scripts.length} script(s)`,
+      );
+      mountWorkspaceFolder();
+    });
+
+    // When a file is edited in VS Code, push back to the web app
     fsProvider.onScriptWrite = (script) => {
-      ws.send(JSON.stringify({ kind: "scriptUpdate", script }));
+      const current = peer.resources.scripts.getValue();
+      const updated = current.map((s) =>
+        s.path === script.path ? { ...s, content: script.content } : s,
+      );
+      peer.resources.scripts.setValue(updated);
     };
 
-    ws.on("message", (raw) => {
-      let msg: unknown;
-      try {
-        msg = JSON.parse(raw.toString());
-      } catch {
-        return;
-      }
-      handleMessage(msg);
+    // Listen for console log events
+    peer.on("console:log", ({ level, message, timestamp }) => {
+      outputChannel.appendLine(`[${level}] ${timestamp}: ${message}`);
     });
 
     ws.on("close", () => {
@@ -91,34 +107,9 @@ function startServer(): void {
     }
     setStatusBar("error");
   });
-}
+};
 
-function handleMessage(msg: unknown): void {
-  if (typeof msg !== "object" || msg === null) return;
-  const m = msg as Record<string, unknown>;
-
-  if (m.kind === "hello") {
-    outputChannel.appendLine(
-      `[bridge] Project: ${(m.projectId as string | undefined) ?? "unknown"}`,
-    );
-  }
-
-  if (m.kind === "scripts") {
-    const scripts = m.scripts as BridgeScript[] | undefined;
-    if (!scripts) return;
-
-    fsProvider.updateScripts(scripts);
-    outputChannelBridge.appendLine(
-      `[bridge] Received ${scripts.length} script(s)`,
-    );
-    outputChannel.appendLine(`[bridge] Received ${scripts.length} script(s)`);
-    outputChannel.show();
-
-    mountWorkspaceFolder();
-  }
-}
-
-function mountWorkspaceFolder(): void {
+const mountWorkspaceFolder = (): void => {
   const uri = vscode.Uri.parse(`${FS_SCHEME}:/`);
   const already = vscode.workspace.workspaceFolders?.some(
     (f) => f.uri.scheme === FS_SCHEME,
@@ -130,9 +121,9 @@ function mountWorkspaceFolder(): void {
       { uri, name: "Vibe Games Scripts" },
     );
   }
-}
+};
 
-function setStatusBar(state: "waiting" | "connected" | "error"): void {
+const setStatusBar = (state: "waiting" | "connected" | "error"): void => {
   switch (state) {
     case "waiting":
       statusBarItem.text = "$(plug) Vibe Games";
@@ -147,8 +138,8 @@ function setStatusBar(state: "waiting" | "connected" | "error"): void {
       statusBarItem.tooltip = "Vibe Games Bridge: error (click to retry)";
       break;
   }
-}
+};
 
-export function deactivate(): void {
+export const deactivate = (): void => {
   wss?.close();
-}
+};

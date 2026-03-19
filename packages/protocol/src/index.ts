@@ -1,3 +1,6 @@
-export * from "./errors";
-export * from "./messages";
-export * from "./resources";
+export {
+  bridgeSchema,
+  scriptEntrySchema,
+  assetEntrySchema,
+  diagnosticSchema,
+} from "./schema";

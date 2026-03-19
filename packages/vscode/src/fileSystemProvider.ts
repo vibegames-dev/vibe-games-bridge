@@ -1,29 +1,25 @@
 import * as vscode from "vscode";
 
-export interface BridgeScript {
-  id: string;
-  name: string;
-  code: string;
-}
+export type ScriptEntry = { path: string; content: string };
 
 export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
-  private scripts = new Map<string, BridgeScript>();
-  onScriptWrite: ((script: BridgeScript) => void) | undefined;
+  private scripts = new Map<string, ScriptEntry>();
+  onScriptWrite: ((script: ScriptEntry) => void) | undefined;
 
   private readonly _onDidChangeFile =
     new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
     this._onDidChangeFile.event;
 
-  updateScripts(scripts: BridgeScript[]): void {
+  updateScripts(scripts: ScriptEntry[]): void {
     this.scripts.clear();
     for (const script of scripts) {
-      this.scripts.set(script.name, script);
+      this.scripts.set(script.path, script);
     }
     this._onDidChangeFile.fire([
       {
         type: vscode.FileChangeType.Changed,
-        uri: vscode.Uri.parse("vibe-games:/scripts"),
+        uri: vscode.Uri.parse("vibe-games:/"),
       },
     ]);
   }
@@ -34,18 +30,24 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
 
   stat(uri: vscode.Uri): vscode.FileStat {
     const now = Date.now();
+    const path = uri.path.replace(/^\//, "");
 
-    if (uri.path === "/" || uri.path === "/scripts") {
-      return { type: vscode.FileType.Directory, ctime: now, mtime: now, size: 0 };
+    if (path === "" || this.isDirectory(path)) {
+      return {
+        type: vscode.FileType.Directory,
+        ctime: now,
+        mtime: now,
+        size: 0,
+      };
     }
 
-    const script = this.scriptForUri(uri);
+    const script = this.scripts.get(path);
     if (script) {
       return {
         type: vscode.FileType.File,
         ctime: now,
         mtime: now,
-        size: script.code.length,
+        size: script.content.length,
       };
     }
 
@@ -53,22 +55,35 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
-    if (uri.path === "/") {
-      return [["scripts", vscode.FileType.Directory]];
+    const dir = uri.path.replace(/^\//, "");
+    const entries: [string, vscode.FileType][] = [];
+    const seen = new Set<string>();
+
+    for (const scriptPath of this.scripts.keys()) {
+      if (dir === "" || scriptPath.startsWith(`${dir}/`)) {
+        const relative = dir === "" ? scriptPath : scriptPath.slice(dir.length + 1);
+        const parts = relative.split("/");
+        const name = parts[0]!;
+
+        if (seen.has(name)) continue;
+        seen.add(name);
+
+        if (parts.length === 1) {
+          entries.push([name, vscode.FileType.File]);
+        } else {
+          entries.push([name, vscode.FileType.Directory]);
+        }
+      }
     }
-    if (uri.path === "/scripts") {
-      return [...this.scripts.keys()].map((name) => [
-        `${name}.ts`,
-        vscode.FileType.File,
-      ]);
-    }
-    throw vscode.FileSystemError.FileNotFound(uri);
+
+    return entries;
   }
 
   readFile(uri: vscode.Uri): Uint8Array {
-    const script = this.scriptForUri(uri);
+    const path = uri.path.replace(/^\//, "");
+    const script = this.scripts.get(path);
     if (!script) throw vscode.FileSystemError.FileNotFound(uri);
-    return Buffer.from(script.code, "utf8");
+    return Buffer.from(script.content, "utf8");
   }
 
   writeFile(
@@ -76,12 +91,13 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     content: Uint8Array,
     _options: { create: boolean; overwrite: boolean },
   ): void {
-    const script = this.scriptForUri(uri);
+    const path = uri.path.replace(/^\//, "");
+    const script = this.scripts.get(path);
     if (!script) throw vscode.FileSystemError.FileNotFound(uri);
 
-    const updatedScript = { ...script, code: Buffer.from(content).toString("utf8") };
-    this.scripts.set(script.name, updatedScript);
-    this.onScriptWrite?.(updatedScript);
+    const updated = { ...script, content: Buffer.from(content).toString("utf8") };
+    this.scripts.set(path, updated);
+    this.onScriptWrite?.(updated);
 
     this._onDidChangeFile.fire([
       { type: vscode.FileChangeType.Changed, uri },
@@ -100,9 +116,11 @@ export class BridgeFileSystemProvider implements vscode.FileSystemProvider {
     throw vscode.FileSystemError.NoPermissions("Read-only for now");
   }
 
-  private scriptForUri(uri: vscode.Uri): BridgeScript | undefined {
-    const filename = uri.path.split("/").pop() ?? "";
-    const name = filename.endsWith(".ts") ? filename.slice(0, -3) : filename;
-    return this.scripts.get(name);
+  private isDirectory(path: string): boolean {
+    const prefix = `${path}/`;
+    for (const key of this.scripts.keys()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
   }
 }
