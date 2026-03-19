@@ -1,45 +1,26 @@
 import type {
-  BridgeClientRequest,
-  BridgeError,
   BridgeResourceDescriptor,
   BridgeServerMessage,
 } from "@vibe-games-bridge/protocol";
 
-export interface BridgeAuthContext {
-  clientId: string;
-  projectId?: string;
-  subject?: string;
-}
+export type BridgeResourceAdapter = {
+  list(): Promise<BridgeResourceDescriptor[]>;
+  read?(path: string): Promise<string | undefined>;
+  write?(path: string, content: string): Promise<void>;
+};
 
-export interface BridgeConnection {
-  id: string;
-  projectId?: string;
+export type BridgeServerOptions = {
+  authenticate(token: string | undefined): Promise<{ clientId: string }>;
+  resources: BridgeResourceAdapter;
+};
+
+export type BridgeConnection = {
   send(message: BridgeServerMessage): void;
-}
+  onMessage(raw: string): void;
+  onClose(): void;
+};
 
-export interface BridgeResourceAdapter {
-  list(projectId: string): Promise<BridgeResourceDescriptor[]>;
-  read?(resource: BridgeResourceDescriptor): Promise<string | undefined>;
-  write?(resource: BridgeResourceDescriptor, contents: string): Promise<void>;
-}
+export type BridgeServer = {
+  connect(send: (data: string) => void): BridgeConnection;
+};
 
-export interface BridgeRequestContext {
-  auth: BridgeAuthContext;
-  connection: BridgeConnection;
-  resources: BridgeResourceAdapter;
-}
-
-export type BridgeRequestHandlerResult =
-  | { ok: true; payload?: unknown }
-  | { ok: false; error: BridgeError };
-
-export type BridgeRequestHandler = (
-  request: BridgeClientRequest,
-  context: BridgeRequestContext,
-) => Promise<BridgeRequestHandlerResult>;
-
-export interface BridgeHostOptions {
-  authenticateToken(token: string | undefined): Promise<BridgeAuthContext>;
-  resources: BridgeResourceAdapter;
-  handleRequest?: BridgeRequestHandler;
-}

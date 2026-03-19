@@ -27,7 +27,6 @@ export const bridgeEventSchema = z.object({
 export const bridgeHelloSchema = z.object({
   kind: z.literal("hello"),
   protocolVersion: z.literal(1),
-  projectId: z.string().optional(),
   token: z.string().optional(),
 });
 

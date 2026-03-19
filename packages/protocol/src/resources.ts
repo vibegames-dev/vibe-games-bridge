@@ -13,7 +13,6 @@ export const bridgeResourceKindSchema = z.enum([
 export type BridgeResourceKind = z.infer<typeof bridgeResourceKindSchema>;
 
 export const bridgeResourceDescriptorSchema = z.object({
-  projectId: z.string(),
   kind: bridgeResourceKindSchema,
   path: z.string(),
   version: z.string().optional(),
